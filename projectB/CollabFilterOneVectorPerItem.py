@@ -53,14 +53,30 @@ class CollabFilterOneVectorPerItem(AbstractBaseCollabFilterSGD):
 
         # TODO fix the lines below to have right dimensionality & values
         # TIP: use self.n_factors to access number of hidden dimensions
-        self.param_dict = dict(
-            mu=ag_np.ones(1),
-            b_per_user=ag_np.ones(1), # FIX dimensionality
-            c_per_item=ag_np.ones(1), # FIX dimensionality
-            U=0.001 * random_state.randn(1), # FIX dimensionality
-            V=0.001 * random_state.randn(1), # FIX dimensionality
-            )
+        # Unpack training data
+        user_ids_train = train_tuple[0]  # array of user_ids
+        item_ids_train = train_tuple[1]  # array of item_ids
+        ratings_train = train_tuple[2]   # array of ratings
 
+        # Compute global mean rating
+        mu = ag_np.array([ag_np.mean(ratings_train)], dtype=ag_np.float)
+
+        # Initialize biases per user and per item to zeros
+        b_per_user = ag_np.zeros(n_users, dtype=ag_np.float)
+        c_per_item = ag_np.zeros(n_items, dtype=ag_np.float)
+
+        # Initialize latent factors U and V to small random numbers
+        U = 0.01 * random_state.randn(n_users, self.n_factors)
+        V = 0.01 * random_state.randn(n_items, self.n_factors)
+
+        # Store parameters in param_dict
+        self.param_dict = dict(
+            mu=mu,
+            b_per_user=b_per_user,
+            c_per_item=c_per_item,
+            U=U,
+            V=V,
+        )
 
     def predict(self, user_id_N, item_id_N,
                 mu=None, b_per_user=None, c_per_item=None, U=None, V=None):
@@ -81,10 +97,30 @@ class CollabFilterOneVectorPerItem(AbstractBaseCollabFilterSGD):
             Entry n is for the n-th pair of user_id, item_id values provided.
         '''
         # TODO: Update with actual prediction logic
-        N = user_id_N.size
-        yhat_N = ag_np.ones(N)
-        return yhat_N
+        if mu is None:
+            mu = self.param_dict['mu']
+        if b_per_user is None:
+            b_per_user = self.param_dict['b_per_user']
+        if c_per_item is None:
+            c_per_item = self.param_dict['c_per_item']
+        if U is None:
+            U = self.param_dict['U']
+        if V is None:
+            V = self.param_dict['V']
 
+        # Get biases and latent factors for the specified user_ids and item_ids
+        b_u = b_per_user[user_id_N]      # User biases, shape (N,)
+        c_i = c_per_item[item_id_N]      # Item biases, shape (N,)
+        U_u = U[user_id_N, :]            # User latent factors, shape (N, K)
+        V_i = V[item_id_N, :]            # Item latent factors, shape (N, K)
+
+        # Compute dot product between user and item latent factors
+        dot_product = ag_np.sum(U_u * V_i, axis=1)  # shape (N,)
+
+        # Compute predictions
+        yhat_N = mu + b_u + c_i + dot_product
+
+        return yhat_N
 
     def calc_loss_wrt_parameter_dict(self, param_dict, data_tuple):
         ''' Compute loss at given parameters
@@ -101,10 +137,29 @@ class CollabFilterOneVectorPerItem(AbstractBaseCollabFilterSGD):
         '''
         # TODO compute loss
         # TIP: use self.alpha to access regularization strength
-        y_N = data_tuple[2]
-        yhat_N = self.predict(data_tuple[0], data_tuple[1], **param_dict)
-        loss_total = 0.0
-        return loss_total    
+        # Unpack data
+        user_id_N = data_tuple[0]
+        item_id_N = data_tuple[1]
+        y_N = data_tuple[2]  # true ratings
+
+        # Compute predictions
+        yhat_N = self.predict(user_id_N, item_id_N, **param_dict)
+
+        # Compute squared error loss
+        errors = y_N - yhat_N
+        squared_error_loss = ag_np.sum(errors ** 2)
+
+        # Compute L2 regularization term
+        # Regularize U and V only
+        U = param_dict['U']
+        V = param_dict['V']
+
+        reg_loss = self.alpha * (ag_np.sum(U ** 2) + ag_np.sum(V ** 2))
+
+        # Total loss
+        loss_total = squared_error_loss + reg_loss
+
+        return loss_total  
 
 
 if __name__ == '__main__':
