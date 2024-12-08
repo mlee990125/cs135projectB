@@ -20,146 +20,114 @@ from train_valid_test_loader import load_train_valid_test_datasets
 
 # No other imports specific to ML (e.g. scikit) needed!
 
+import autograd.numpy as ag_np
+
+import autograd.numpy as ag_np
+
 class CollabFilterOneVectorPerItem(AbstractBaseCollabFilterSGD):
-    ''' One-vector-per-user, one-vector-per-item recommendation model.
-
-    Assumes each user, each item has learned vector of size `n_factors`.
-
-    Attributes required in param_dict
-    ---------------------------------
-    mu : 1D array of size (1,)
-    b_per_user : 1D array, size n_users
-    c_per_item : 1D array, size n_items
-    U : 2D array, size n_users x n_factors
-    V : 2D array, size n_items x n_factors
-
-    Notes
-    -----
-    Inherits *__init__** constructor from AbstractBaseCollabFilterSGD.
-    Inherits *fit* method from AbstractBaseCollabFilterSGD.
-    '''
 
     def init_parameter_dict(self, n_users, n_items, train_tuple):
-        ''' Initialize parameter dictionary attribute for this instance.
-
-        Post Condition
-        --------------
-        Updates the following attributes of this instance:
-        * param_dict : dict
-            Keys are string names of parameters
-            Values are *numpy arrays* of parameter values
-        '''
-        random_state = self.random_state # inherited RandomState object
-
-        # TODO fix the lines below to have right dimensionality & values
-        # TIP: use self.n_factors to access number of hidden dimensions
-        # Unpack training data
-        user_ids_train = train_tuple[0]  # array of user_ids
-        item_ids_train = train_tuple[1]  # array of item_ids
-        ratings_train = train_tuple[2]   # array of ratings
-
-        # Compute global mean rating
-        mu = ag_np.array([ag_np.mean(ratings_train)], dtype=ag_np.float)
-
-        # Initialize biases per user and per item to zeros
-        b_per_user = ag_np.zeros(n_users, dtype=ag_np.float)
-        c_per_item = ag_np.zeros(n_items, dtype=ag_np.float)
-
-        # Initialize latent factors U and V to small random numbers
-        U = 0.01 * random_state.randn(n_users, self.n_factors)
-        V = 0.01 * random_state.randn(n_items, self.n_factors)
-
-        # Store parameters in param_dict
+        random_state = self.random_state
+        
+        # Initialize mu to global mean of training ratings
+        user_id_N, item_id_N, y_N = train_tuple
+        global_mean = ag_np.mean(y_N)
+        
         self.param_dict = dict(
-            mu=mu,
-            b_per_user=b_per_user,
-            c_per_item=c_per_item,
-            U=U,
-            V=V,
+            # Initialize mu to global mean
+            mu=ag_np.array([global_mean]),
+            # Initialize biases to small random values
+            b_per_user=0.1 * random_state.randn(n_users),
+            c_per_item=0.1 * random_state.randn(n_items),
+            # Initialize factors to small random values
+            U=0.1 * random_state.randn(n_users, self.n_factors),
+            V=0.1 * random_state.randn(n_items, self.n_factors)
         )
+    # def init_parameter_dict(self, n_users, n_items, train_tuple):
+    #     ''' Initialize parameter dictionary attribute for this instance. '''
+    #     random_state = self.random_state  # Inherited RandomState for reproducibility
+
+    #     self.param_dict = {
+    #         'mu': ag_np.ones(1) * train_tuple[2].mean(),
+    #         'b_per_user': ag_np.zeros(n_users),
+    #         'c_per_item': ag_np.zeros(n_items),
+    #         'U': 0.001 * random_state.randn(n_users, self.n_factors),
+    #         'V': 0.001 * random_state.randn(n_items, self.n_factors)
+    #     }
+
 
     def predict(self, user_id_N, item_id_N,
                 mu=None, b_per_user=None, c_per_item=None, U=None, V=None):
-        ''' Predict ratings at specific user_id, item_id pairs
-
-        Args
-        ----
-        user_id_N : 1D array, size n_examples
-            Specific user_id values to use to make predictions
-        item_id_N : 1D array, size n_examples
-            Specific item_id values to use to make predictions
-            Each entry is paired with the corresponding entry of user_id_N
-
-        Returns
-        -------
-        yhat_N : 1D array, size n_examples
-            Scalar predicted ratings, one per provided example.
-            Entry n is for the n-th pair of user_id, item_id values provided.
-        '''
-        # TODO: Update with actual prediction logic
-        if mu is None:
-            mu = self.param_dict['mu']
-        if b_per_user is None:
-            b_per_user = self.param_dict['b_per_user']
-        if c_per_item is None:
-            c_per_item = self.param_dict['c_per_item']
-        if U is None:
-            U = self.param_dict['U']
-        if V is None:
-            V = self.param_dict['V']
-
-        # Get biases and latent factors for the specified user_ids and item_ids
-        b_u = b_per_user[user_id_N]      # User biases, shape (N,)
-        c_i = c_per_item[item_id_N]      # Item biases, shape (N,)
-        U_u = U[user_id_N, :]            # User latent factors, shape (N, K)
-        V_i = V[item_id_N, :]            # Item latent factors, shape (N, K)
-
-        # Compute dot product between user and item latent factors
-        dot_product = ag_np.sum(U_u * V_i, axis=1)  # shape (N,)
-
-        # Compute predictions
-        yhat_N = mu + b_u + c_i + dot_product
-
+        """Predict ratings for given user-item pairs."""
+        # Cast indices for array indexing
+        user_id_N = user_id_N.astype(ag_np.int32)
+        item_id_N = item_id_N.astype(ag_np.int32)
+        
+        # Start with global mean
+        yhat_N = ag_np.zeros_like(user_id_N, dtype=ag_np.float64) + mu[0]
+        
+        # Add user and item biases
+        yhat_N = yhat_N + b_per_user[user_id_N]
+        yhat_N = yhat_N + c_per_item[item_id_N]
+        
+        # Add matrix factorization term
+        # Get relevant vectors
+        U_N = U[user_id_N]  # Shape: (n_examples, n_factors)
+        V_N = V[item_id_N]  # Shape: (n_examples, n_factors)
+        
+        # Compute dot product for each user-item pair
+        yhat_N = yhat_N + ag_np.sum(U_N * V_N, axis=1)
+        
         return yhat_N
+    # def predict(self, user_id_N, item_id_N, mu=None, b_per_user=None, c_per_item=None, U=None, V=None):
+    #     ''' Predict ratings at specific user_id, item_id pairs. '''
+    #     # Use provided parameters or default to the instance's param_dict
+    #     if mu is None: mu = self.param_dict['mu']
+    #     if b_per_user is None: b_per_user = self.param_dict['b_per_user']
+    #     if c_per_item is None: c_per_item = self.param_dict['c_per_item']
+    #     if U is None: U = self.param_dict['U']
+    #     if V is None: V = self.param_dict['V']
+
+    #     user_bias = b_per_user[user_id_N]
+    #     item_bias = c_per_item[item_id_N]
+    #     interaction = ag_np.sum(U[user_id_N] * V[item_id_N], axis=1)
+    #     return mu + user_bias + item_bias + interaction
+
 
     def calc_loss_wrt_parameter_dict(self, param_dict, data_tuple):
-        ''' Compute loss at given parameters
-
-        Args
-        ----
-        param_dict : dict
-            Keys are string names of parameters
-            Values are *numpy arrays* of parameter values
-
-        Returns
-        -------
-        loss : float scalar
-        '''
-        # TODO compute loss
-        # TIP: use self.alpha to access regularization strength
-        # Unpack data
-        user_id_N = data_tuple[0]
-        item_id_N = data_tuple[1]
-        y_N = data_tuple[2]  # true ratings
-
-        # Compute predictions
+        """Compute loss function."""
+        user_id_N, item_id_N, y_N = data_tuple
+        
+        # Get predicted ratings
         yhat_N = self.predict(user_id_N, item_id_N, **param_dict)
+        
+        # Compute MSE loss
+        N = ag_np.float64(user_id_N.shape[0])
+        err_N = yhat_N - y_N
+        mse_loss = ag_np.sum(err_N * err_N) / (2.0 * N)  # Include 1/2 factor for cleaner gradients
+        
+        # Add L2 regularization on U and V matrices
+        reg_loss = (self.alpha / 2.0) * (
+            ag_np.sum(param_dict['U']**2) + 
+            ag_np.sum(param_dict['V']**2) +
+            ag_np.sum(param_dict['b_per_user']**2) +
+            ag_np.sum(param_dict['c_per_item']**2)
+        ) / N
+        
+        total_loss = mse_loss + reg_loss
+        return total_loss
 
-        # Compute squared error loss
-        errors = y_N - yhat_N
-        squared_error_loss = ag_np.sum(errors ** 2)
+    # def calc_loss_wrt_parameter_dict(self, param_dict, data_tuple):
+    #     ''' Compute loss at given parameters. '''
+    #     user_id_N, item_id_N, y_N = data_tuple
+    #     yhat_N = self.predict(user_id_N, item_id_N, **param_dict)
+    #     error = y_N - yhat_N
+    #     mse_loss = ag_np.mean(error**2)
 
-        # Compute L2 regularization term
-        # Regularize U and V only
-        U = param_dict['U']
-        V = param_dict['V']
-
-        reg_loss = self.alpha * (ag_np.sum(U ** 2) + ag_np.sum(V ** 2))
-
-        # Total loss
-        loss_total = squared_error_loss + reg_loss
-
-        return loss_total  
+    #     reg_loss = self.alpha * (
+    #         ag_np.sum(param_dict['U']**2) + ag_np.sum(param_dict['V']**2)
+    #     )
+    #     return mse_loss + reg_loss
 
 
 if __name__ == '__main__':
