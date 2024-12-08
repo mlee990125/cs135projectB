@@ -59,6 +59,16 @@ class CollabFilterOneVectorPerItem(AbstractBaseCollabFilterSGD):
     def predict(self, user_id_N, item_id_N,
                 mu=None, b_per_user=None, c_per_item=None, U=None, V=None):
         """Predict ratings for given user-item pairs."""
+        if mu is None: 
+            mu = self.param_dict['mu']
+        if b_per_user is None:
+            b_per_user = self.param_dict['b_per_user']
+        if c_per_item is None:
+            c_per_item = self.param_dict['c_per_item']
+        if U is None:
+            U = self.param_dict['U']
+        if V is None:
+            V = self.param_dict['V']
         # Cast indices for array indexing
         user_id_N = user_id_N.astype(ag_np.int32)
         item_id_N = item_id_N.astype(ag_np.int32)
